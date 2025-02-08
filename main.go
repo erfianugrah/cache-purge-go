@@ -23,9 +23,10 @@ type Config struct {
 }
 
 type PurgeRequest struct {
-	Files []string `json:"files,omitempty"`
-	Tags  []string `json:"tags,omitempty"`
-	Hosts []string `json:"hosts,omitempty"`
+	Files           []string `json:"files,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	Hosts           []string `json:"hosts,omitempty"`
+	PurgeEverything bool     `json:"purge_everything,omitempty"`
 }
 
 type Zone struct {
@@ -103,36 +104,37 @@ func handlePurge(args []string) {
 	flags := flag.NewFlagSet("purge", flag.ExitOnError)
 
 	setupGlobalFlags(flags)
-
-	hosts := flags.String("hosts", "", "Comma-separated list of hosts to purge (automatically matched to domains)")
-	urls := flags.String("urls", "", "Comma-separated list of URLs to purge (automatically matched to domains)")
+	hosts := flags.String("hosts", "", "Comma-separated list of hosts to purge")
+	urls := flags.String("urls", "", "Comma-separated list of URLs to purge")
 	tags := flags.String("tags", "", "Comma-separated list of cache tags to purge")
 	all := flags.Bool("all", false, "Apply to all zones")
-	everything := flags.Bool("everything", false, "Purge everything (all files and assets)")
+	everything := flags.Bool("everything", false, "Purge everything from specified zones")
 
+	// Custom usage message
 	flags.Usage = func() {
-		fmt.Println("Usage: cfpurge purge [flags] [zone...]")
-		fmt.Println("\nPurge cache for one or more zones. The tool will automatically match hosts and URLs to their domains.")
+		fmt.Println("Usage: cfpurge purge [-flags] <zone...>")
 		fmt.Println("\nExamples:")
-		fmt.Println("  # Purge everything from a specific zone")
-		fmt.Println("  cfpurge purge example.com -everything")
-		fmt.Println("\n  # Purge specific hosts (automatically matched to their domains)")
-		fmt.Println("  cfpurge purge -hosts=\"api.example.com,cdn.example.com,api.other.com\"")
-		fmt.Println("\n  # Purge specific URLs (automatically matched to their domains)")
-		fmt.Println("  cfpurge purge -urls=\"https://example.com/page1,https://other.com/page1\"")
-		fmt.Println("\n  # Purge by tags")
-		fmt.Println("  cfpurge purge -tags=\"tag1,tag2\"")
+		fmt.Println("  cfpurge purge -everything example.com")
+		fmt.Println("  cfpurge purge -hosts=\"api.example.com,www.example.com\"")
+		fmt.Println("  cfpurge purge -urls=\"https://example.com/page1\"")
+		fmt.Println("  cfpurge purge -all -tags=\"tag1,tag2\"")
 		fmt.Println("\nFlags:")
 		flags.PrintDefaults()
 	}
 
-	flags.Parse(args)
+	// Parse flags
+	if err := flags.Parse(args); err != nil {
+		fmt.Printf("Error parsing flags: %v\n", err)
+		os.Exit(1)
+	}
+
 	validateAuth()
 
+	// Get non-flag arguments (zones)
 	zoneArgs := flags.Args()
 
-	if len(zoneArgs) == 0 && !*all && *hosts == "" && *urls == "" && *tags == "" && !*everything {
-		fmt.Println("Error: Must specify at least one zone, use -all flag, or provide hosts/urls/tags to purge")
+	if len(zoneArgs) == 0 && !*all && *hosts == "" && *urls == "" && *tags == "" {
+		fmt.Println("Error: Must specify at least one zone, use -all flag, or provide hosts/urls/tags")
 		flags.Usage()
 		os.Exit(1)
 	}
@@ -143,136 +145,86 @@ func handlePurge(args []string) {
 		os.Exit(1)
 	}
 
-	// Create zone maps for both exact and suffix matching
-	zoneMap := make(map[string]Zone)
-	zonesByDomain := make(map[string]Zone)
+	// Create zone maps for lookups
+	zoneMap := make(map[string]Zone)       // For exact matches
+	zonesByDomain := make(map[string]Zone) // For domain matching
 	for _, zone := range zones {
 		zoneMap[zone.Name] = zone
 		zoneMap[zone.ID] = zone
 		zonesByDomain[zone.Name] = zone
 	}
 
-	purgeConfigs := make(map[string]ZonePurgeConfig)
-
-	// Initialize configs for explicitly specified zones
-	for _, arg := range zoneArgs {
-		if zone, ok := zoneMap[arg]; ok {
-			purgeConfigs[zone.Name] = ZonePurgeConfig{
-				Zone: zone,
-				Tags: splitCommaList(*tags),
-			}
-		} else {
-			fmt.Printf("Warning: Zone '%s' not found\n", arg)
-		}
-	}
-
-	// Add all zones if requested
+	// Handle specific zones or all zones
+	var targetZones []Zone
 	if *all {
-		for _, zone := range zones {
-			purgeConfigs[zone.Name] = ZonePurgeConfig{
-				Zone: zone,
-				Tags: splitCommaList(*tags),
-			}
-		}
-	}
-
-	// Process hosts
-	if *hosts != "" {
-		hostList := splitCommaList(*hosts)
-		for _, host := range hostList {
-			matched := false
-			// Find the longest matching zone name (most specific match)
-			var matchedZoneName string
-			var matchedZone Zone
-			for zoneName, zone := range zonesByDomain {
-				if strings.HasSuffix(host, zoneName) && (matchedZoneName == "" || len(zoneName) > len(matchedZoneName)) {
-					matchedZoneName = zoneName
-					matchedZone = zone
-					matched = true
-				}
-			}
-			if matched {
-				config := purgeConfigs[matchedZoneName]
-				config.Zone = matchedZone
-				config.Hosts = append(config.Hosts, host)
-				purgeConfigs[matchedZoneName] = config
+		targetZones = zones
+	} else if len(zoneArgs) > 0 {
+		for _, arg := range zoneArgs {
+			if zone, ok := zoneMap[arg]; ok {
+				targetZones = append(targetZones, zone)
 			} else {
-				fmt.Printf("Warning: No matching zone found for host: %s\n", host)
+				fmt.Printf("Warning: Zone '%s' not found\n", arg)
 			}
 		}
 	}
 
-	// Process URLs
-	if *urls != "" {
-		urlList := splitCommaList(*urls)
-		for _, url := range urlList {
-			matched := false
-			var matchedZoneName string
-			var matchedZone Zone
-			for zoneName, zone := range zonesByDomain {
-				if strings.Contains(url, zoneName) && (matchedZoneName == "" || len(zoneName) > len(matchedZoneName)) {
-					matchedZoneName = zoneName
-					matchedZone = zone
-					matched = true
-				}
-			}
-			if matched {
-				config := purgeConfigs[matchedZoneName]
-				config.Zone = matchedZone
-				config.URLs = append(config.URLs, url)
-				purgeConfigs[matchedZoneName] = config
-			} else {
-				fmt.Printf("Warning: No matching zone found for URL: %s\n", url)
-			}
-		}
-	}
-
-	// Add tags to all configs if specified
-	if *tags != "" {
-		tagList := splitCommaList(*tags)
-		for zoneName, config := range purgeConfigs {
-			config.Tags = tagList
-			purgeConfigs[zoneName] = config
-		}
-	}
-
-	if len(purgeConfigs) == 0 {
-		fmt.Println("Error: No valid zones found to purge")
-		os.Exit(1)
-	}
-
-	// Process purge for each zone
-	for _, config := range purgeConfigs {
+	// Process purge for each target zone
+	for _, zone := range targetZones {
 		if *everything {
-			if err := purgeEverything(config.Zone.ID); err != nil {
-				fmt.Printf("Error purging everything for %s: %v\n", config.Zone.Name, err)
-				continue
-			}
-		} else if len(config.Hosts) > 0 || len(config.URLs) > 0 || len(config.Tags) > 0 {
 			req := PurgeRequest{
-				Files: config.URLs,
-				Tags:  config.Tags,
-				Hosts: config.Hosts,
+				PurgeEverything: true,
 			}
-
-			if err := purgeCacheAPI(config.Zone.ID, req); err != nil {
-				fmt.Printf("Error purging cache for %s: %v\n", config.Zone.Name, err)
+			if err := purgeCacheAPI(zone.ID, req); err != nil {
+				fmt.Printf("Error purging everything from %s: %v\n", zone.Name, err)
 				continue
+			}
+			fmt.Printf("Successfully purged everything from %s\n", zone.Name)
+			continue
+		}
+
+		var purgeHosts []string
+		var purgeURLs []string
+
+		// Match hosts to this zone
+		if *hosts != "" {
+			for _, host := range splitCommaList(*hosts) {
+				if strings.HasSuffix(host, zone.Name) {
+					purgeHosts = append(purgeHosts, host)
+				}
 			}
 		}
 
-		// Print what was purged
-		if *everything {
-			fmt.Printf("Purged everything from %s\n", config.Zone.Name)
-		} else {
-			if len(config.Hosts) > 0 {
-				fmt.Printf("Purged hosts from %s: %s\n", config.Zone.Name, strings.Join(config.Hosts, ", "))
+		// Match URLs to this zone
+		if *urls != "" {
+			for _, url := range splitCommaList(*urls) {
+				if strings.Contains(url, zone.Name) {
+					purgeURLs = append(purgeURLs, url)
+				}
 			}
-			if len(config.URLs) > 0 {
-				fmt.Printf("Purged URLs from %s: %s\n", config.Zone.Name, strings.Join(config.URLs, ", "))
+		}
+
+		// Create and send purge request if needed
+		if len(purgeHosts) > 0 || len(purgeURLs) > 0 || *tags != "" {
+			req := PurgeRequest{
+				Files: purgeURLs,
+				Tags:  splitCommaList(*tags),
+				Hosts: purgeHosts,
 			}
-			if len(config.Tags) > 0 {
-				fmt.Printf("Purged tags from %s: %s\n", config.Zone.Name, strings.Join(config.Tags, ", "))
+
+			if err := purgeCacheAPI(zone.ID, req); err != nil {
+				fmt.Printf("Error purging cache for %s: %v\n", zone.Name, err)
+				continue
+			}
+
+			// Print what was purged
+			if len(purgeHosts) > 0 {
+				fmt.Printf("Purged hosts from %s: %s\n", zone.Name, strings.Join(purgeHosts, ", "))
+			}
+			if len(purgeURLs) > 0 {
+				fmt.Printf("Purged URLs from %s: %s\n", zone.Name, strings.Join(purgeURLs, ", "))
+			}
+			if *tags != "" {
+				fmt.Printf("Purged tags from %s: %s\n", zone.Name, *tags)
 			}
 		}
 	}
@@ -354,47 +306,6 @@ func listAllZones() ([]Zone, error) {
 
 func purgeCacheAPI(zoneID string, req PurgeRequest) error {
 	url := fmt.Sprintf("%s/zones/%s/purge_cache", baseURL, zoneID)
-
-	jsonData, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("error marshaling request: %v", err)
-	}
-
-	request, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("error creating request: %v", err)
-	}
-
-	setAuthHeaders(request)
-	request.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		return fmt.Errorf("error making request: %v", err)
-	}
-	defer response.Body.Close()
-
-	var cfResponse CloudflareResponse
-	if err := json.NewDecoder(response.Body).Decode(&cfResponse); err != nil {
-		return fmt.Errorf("error parsing response: %v", err)
-	}
-
-	if !cfResponse.Success {
-		return fmt.Errorf("cloudflare API error")
-	}
-
-	return nil
-}
-
-func purgeEverything(zoneID string) error {
-	url := fmt.Sprintf("%s/zones/%s/purge_cache", baseURL, zoneID)
-
-	req := struct {
-		PurgeEverything bool `json:"purge_everything"`
-	}{
-		PurgeEverything: true,
-	}
 
 	jsonData, err := json.Marshal(req)
 	if err != nil {
