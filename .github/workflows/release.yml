@@ -9,7 +9,24 @@ permissions:
   contents: write
 
 jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag signature
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          if ! git verify-tag "$TAG_NAME"; then
+            echo "ERROR: Tag $TAG_NAME is not signed or signature verification failed"
+            exit 1
+          fi
+
   goreleaser:
+    needs: verify-tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
