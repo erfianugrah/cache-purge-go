@@ -1,18 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"os"
 	"strings"
-)
 
-const (
-	baseURL = "https://api.cloudflare.com/client/v4"
+	cloudflare "github.com/cloudflare/cloudflare-go"
 )
 
 type Config struct {
@@ -20,43 +15,6 @@ type Config struct {
 	APIKey    string
 	Email     string
 	AccountID string
-}
-
-type PurgeRequest struct {
-	Files           []string `json:"files,omitempty"`
-	Tags            []string `json:"tags,omitempty"`
-	Hosts           []string `json:"hosts,omitempty"`
-	PurgeEverything bool     `json:"purge_everything,omitempty"`
-}
-
-type Zone struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-}
-
-type ZoneListResponse struct {
-	Success bool    `json:"success"`
-	Errors  []Error `json:"errors"`
-	Result  []Zone  `json:"result"`
-}
-
-type CloudflareResponse struct {
-	Success bool     `json:"success"`
-	Errors  []Error  `json:"errors"`
-	Result  struct{} `json:"result"`
-}
-
-type Error struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type ZonePurgeConfig struct {
-	Zone  Zone
-	Hosts []string
-	URLs  []string
-	Tags  []string
 }
 
 var config Config
@@ -86,7 +44,9 @@ func handleList() {
 
 	validateAuth()
 
-	zones, err := listAllZones()
+	client := createClient()
+
+	zones, err := client.ListZones(context.Background())
 	if err != nil {
 		fmt.Printf("Error listing zones: %v\n", err)
 		os.Exit(1)
@@ -109,8 +69,8 @@ func handlePurge(args []string) {
 	tags := flags.String("tags", "", "Comma-separated list of cache tags to purge")
 	all := flags.Bool("all", false, "Apply to all zones")
 	everything := flags.Bool("everything", false, "Purge everything from specified zones")
+	quiet := flags.Bool("quiet", false, "Suppress success messages")
 
-	// Custom usage message
 	flags.Usage = func() {
 		fmt.Println("Usage: cfpurge purge [-flags] <zone...>")
 		fmt.Println("\nExamples:")
@@ -122,40 +82,34 @@ func handlePurge(args []string) {
 		flags.PrintDefaults()
 	}
 
-	// Parse flags
 	if err := flags.Parse(args); err != nil {
 		fmt.Printf("Error parsing flags: %v\n", err)
 		os.Exit(1)
 	}
 
 	validateAuth()
+	client := createClient()
 
-	// Get non-flag arguments (zones)
 	zoneArgs := flags.Args()
-
 	if len(zoneArgs) == 0 && !*all && *hosts == "" && *urls == "" && *tags == "" {
 		fmt.Println("Error: Must specify at least one zone, use -all flag, or provide hosts/urls/tags")
 		flags.Usage()
 		os.Exit(1)
 	}
 
-	zones, err := listAllZones()
+	zones, err := client.ListZones(context.Background())
 	if err != nil {
 		fmt.Printf("Error getting zones: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create zone maps for lookups
-	zoneMap := make(map[string]Zone)       // For exact matches
-	zonesByDomain := make(map[string]Zone) // For domain matching
+	zoneMap := make(map[string]cloudflare.Zone)
 	for _, zone := range zones {
 		zoneMap[zone.Name] = zone
 		zoneMap[zone.ID] = zone
-		zonesByDomain[zone.Name] = zone
 	}
 
-	// Handle specific zones or all zones
-	var targetZones []Zone
+	var targetZones []cloudflare.Zone
 	if *all {
 		targetZones = zones
 	} else if len(zoneArgs) > 0 {
@@ -166,26 +120,63 @@ func handlePurge(args []string) {
 				fmt.Printf("Warning: Zone '%s' not found\n", arg)
 			}
 		}
+	} else if *hosts != "" || *urls != "" {
+		hostsList := splitCommaList(*hosts)
+		urlsList := splitCommaList(*urls)
+
+		for _, zone := range zones {
+			shouldInclude := false
+
+			for _, host := range hostsList {
+				if strings.HasSuffix(host, zone.Name) {
+					shouldInclude = true
+					break
+				}
+			}
+
+			for _, url := range urlsList {
+				if strings.Contains(url, zone.Name) {
+					shouldInclude = true
+					break
+				}
+			}
+
+			if shouldInclude {
+				targetZones = append(targetZones, zone)
+			}
+		}
+
+		if len(targetZones) == 0 {
+			fmt.Printf("Error: No matching zones found for the specified hosts/URLs\n")
+			fmt.Printf("Available zones:\n")
+			for _, zone := range zones {
+				fmt.Printf("  %s\n", zone.Name)
+			}
+			os.Exit(1)
+		}
 	}
 
-	// Process purge for each target zone
+	successCount := 0
+	failureCount := 0
+
 	for _, zone := range targetZones {
 		if *everything {
-			req := PurgeRequest{
-				PurgeEverything: true,
-			}
-			if err := purgeCacheAPI(zone.ID, req); err != nil {
-				fmt.Printf("Error purging everything from %s: %v\n", zone.Name, err)
+			_, err := client.PurgeEverything(context.Background(), zone.ID)
+			if err != nil {
+				fmt.Printf("❌ Error purging everything from %s: %v\n", zone.Name, err)
+				failureCount++
 				continue
 			}
-			fmt.Printf("Successfully purged everything from %s\n", zone.Name)
+			if !*quiet {
+				fmt.Printf("✅ Successfully purged everything from %s\n", zone.Name)
+			}
+			successCount++
 			continue
 		}
 
 		var purgeHosts []string
 		var purgeURLs []string
 
-		// Match hosts to this zone
 		if *hosts != "" {
 			for _, host := range splitCommaList(*hosts) {
 				if strings.HasSuffix(host, zone.Name) {
@@ -194,7 +185,6 @@ func handlePurge(args []string) {
 			}
 		}
 
-		// Match URLs to this zone
 		if *urls != "" {
 			for _, url := range splitCommaList(*urls) {
 				if strings.Contains(url, zone.Name) {
@@ -203,31 +193,69 @@ func handlePurge(args []string) {
 			}
 		}
 
-		// Create and send purge request if needed
 		if len(purgeHosts) > 0 || len(purgeURLs) > 0 || *tags != "" {
-			req := PurgeRequest{
-				Files: purgeURLs,
-				Tags:  splitCommaList(*tags),
-				Hosts: purgeHosts,
+			var err error
+
+			if len(purgeHosts) > 0 {
+				_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+					Hosts: purgeHosts,
+				})
 			}
 
-			if err := purgeCacheAPI(zone.ID, req); err != nil {
-				fmt.Printf("Error purging cache for %s: %v\n", zone.Name, err)
+			if len(purgeURLs) > 0 {
+				_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+					Files: purgeURLs,
+				})
+			}
+
+			if len(splitCommaList(*tags)) > 0 {
+				_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+					Tags: splitCommaList(*tags),
+				})
+			}
+			if err != nil {
+				fmt.Printf("❌ Error purging cache for %s: %v\n", zone.Name, err)
+				failureCount++
 				continue
 			}
 
-			// Print what was purged
-			if len(purgeHosts) > 0 {
-				fmt.Printf("Purged hosts from %s: %s\n", zone.Name, strings.Join(purgeHosts, ", "))
+			if !*quiet {
+				if len(purgeHosts) > 0 {
+					fmt.Printf("✅ Purged hosts from %s: %s\n", zone.Name, strings.Join(purgeHosts, ", "))
+				}
+				if len(purgeURLs) > 0 {
+					fmt.Printf("✅ Purged URLs from %s: %s\n", zone.Name, strings.Join(purgeURLs, ", "))
+				}
+				if *tags != "" {
+					fmt.Printf("✅ Purged tags from %s: %s\n", zone.Name, *tags)
+				}
 			}
-			if len(purgeURLs) > 0 {
-				fmt.Printf("Purged URLs from %s: %s\n", zone.Name, strings.Join(purgeURLs, ", "))
-			}
-			if *tags != "" {
-				fmt.Printf("Purged tags from %s: %s\n", zone.Name, *tags)
-			}
+			successCount++
 		}
 	}
+
+	fmt.Printf("\nSummary: %d successful, %d failed\n", successCount, failureCount)
+	if failureCount > 0 {
+		os.Exit(1)
+	}
+}
+
+func createClient() *cloudflare.API {
+	var api *cloudflare.API
+	var err error
+
+	if config.APIToken != "" {
+		api, err = cloudflare.NewWithAPIToken(config.APIToken)
+	} else {
+		api, err = cloudflare.New(config.APIKey, config.Email)
+	}
+
+	if err != nil {
+		fmt.Printf("Error creating client: %v\n", err)
+		os.Exit(1)
+	}
+
+	return api
 }
 
 func setupGlobalFlags(flags *flag.FlagSet) {
@@ -261,89 +289,4 @@ func splitCommaList(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
-}
-
-func listAllZones() ([]Zone, error) {
-	url := fmt.Sprintf("%s/zones", baseURL)
-	if config.AccountID != "" {
-		url += fmt.Sprintf("?account.id=%s", config.AccountID)
-	}
-
-	request, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error creating request: %v", err)
-	}
-
-	setAuthHeaders(request)
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("error making request: %v", err)
-	}
-	defer response.Body.Close()
-
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading response: %v", err)
-	}
-
-	var zoneResponse ZoneListResponse
-	if err := json.Unmarshal(body, &zoneResponse); err != nil {
-		return nil, fmt.Errorf("error parsing response: %v", err)
-	}
-
-	if !zoneResponse.Success {
-		var errMsgs []string
-		for _, err := range zoneResponse.Errors {
-			errMsgs = append(errMsgs, err.Message)
-		}
-		return nil, fmt.Errorf("cloudflare API errors: %s", strings.Join(errMsgs, "; "))
-	}
-
-	return zoneResponse.Result, nil
-}
-
-func purgeCacheAPI(zoneID string, req PurgeRequest) error {
-	url := fmt.Sprintf("%s/zones/%s/purge_cache", baseURL, zoneID)
-
-	jsonData, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("error marshaling request: %v", err)
-	}
-
-	request, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("error creating request: %v", err)
-	}
-
-	setAuthHeaders(request)
-	request.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	response, err := client.Do(request)
-	if err != nil {
-		return fmt.Errorf("error making request: %v", err)
-	}
-	defer response.Body.Close()
-
-	var cfResponse CloudflareResponse
-	if err := json.NewDecoder(response.Body).Decode(&cfResponse); err != nil {
-		return fmt.Errorf("error parsing response: %v", err)
-	}
-
-	if !cfResponse.Success {
-		return fmt.Errorf("cloudflare API error")
-	}
-
-	return nil
-}
-
-func setAuthHeaders(request *http.Request) {
-	if config.APIToken != "" {
-		request.Header.Set("Authorization", "Bearer "+config.APIToken)
-	} else {
-		request.Header.Set("X-Auth-Key", config.APIKey)
-		request.Header.Set("X-Auth-Email", config.Email)
-	}
 }
