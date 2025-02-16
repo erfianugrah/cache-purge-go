@@ -35,6 +35,75 @@ All releases must be created using signed tags. Here's how to create a new relea
    - Go to GitHub Settings -> SSH and GPG keys -> New GPG key
    - Paste your public key and save
 
+3. Set up repository secrets for GitHub Actions:
+   - Export your private key: `gpg --export-secret-keys --armor YOUR_KEY_ID`
+   - Go to your repository's Settings -> Secrets and variables -> Actions
+   - Create a new secret `GPG_PRIVATE_KEY` with your exported private key
+   - Create a new secret `GPG_PASSPHRASE` with your GPG key's passphrase
+
+4. Create and push a signed tag:
+   ```bash
+   # Create a signed tag
+   git tag -s v1.0.0 -m "Release v1.0.0"
+
+   # Push the tag
+   git push origin v1.0.0
+   ```
+
+This will trigger the GitHub Actions workflow which will:
+1. Import your GPG key
+2. Verify the tag signature
+3. Build releases for multiple architectures
+4. Create a GitHub release with the built binaries
+
+### Available Release Artifacts
+
+Each release includes binaries for:
+- Linux (x86_64, arm64)
+- macOS (x86_64, arm64)
+- Windows (x86_64, arm64)
+
+Archives are provided as:
+- `.tar.gz` for Linux and macOS
+- `.zip` for Windows
+
+Each release includes checksums for verification.# Cloudflare Cache Purge CLI Tool
+
+A command-line tool for managing Cloudflare cache purge operations across zones.
+
+## Features
+
+- List all zones in your Cloudflare account
+- Purge cache by hosts
+- Purge cache by URLs
+- Purge cache by tags (Enterprise only)
+- Purge everything from specified zones
+- Apply operations to specific zones or all zones
+- Support for both API Token and API Key authentication methods
+
+## Releasing
+
+All releases must be created using signed tags. Here's how to create a new release:
+
+1. Make sure you have a GPG key set up with git:
+   ```bash
+   # Check if you have a GPG key
+   gpg --list-secret-keys --keyid-format LONG
+
+   # If you don't have a key, create one
+   gpg --full-generate-key
+
+   # Add your key to git
+   git config --global user.signingkey YOUR_KEY_ID
+   git config --global commit.gpgsign true
+   git config --global tag.gpgsign true
+   ```
+
+2. Add your GPG key to GitHub:
+   - Export your public key: `gpg --armor --export YOUR_KEY_ID`
+   - Go to GitHub Settings -> SSH and GPG keys -> New GPG key
+   - Paste your public key and save
+
 3. Create and push a signed tag:
    ```bash
    # Create a signed tag

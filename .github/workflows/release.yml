@@ -17,13 +17,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Import GPG key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
+
       - name: Verify tag signature
         run: |
           TAG_NAME="${{ github.ref_name }}"
-          if ! git verify-tag "$TAG_NAME"; then
-            echo "ERROR: Tag $TAG_NAME is not signed or signature verification failed"
-            exit 1
-          fi
+          git fetch --tags --force
+          git tag -v "$TAG_NAME"
 
   goreleaser:
     needs: verify-tag
