@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cf-purge/internal/api"
+	"cfpurge/internal/api"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
@@ -84,7 +84,6 @@ func listNamespaces(client *cloudflare.API) error {
 func listKeys(client *cloudflare.API, namespace string, verbose bool, filter string, limit int, cursor string) error {
 	params := cloudflare.ListWorkersKVKeysParams{
 		NamespaceID: namespace,
-		AccountID:   api.GetAccountID(),
 		Limit:       limit,
 	}
 
@@ -96,12 +95,7 @@ func listKeys(client *cloudflare.API, namespace string, verbose bool, filter str
 		params.Cursor = cursor
 	}
 
-	// If verbose is enabled, we need to fetch metadata
-	if verbose {
-		params.Metadata = true
-	}
-
-	keys, listResult, err := client.ListWorkersKVKeys(context.Background(), params)
+	keys, listResult, err := client.ListWorkersKVKeys(context.Background(), api.GetAccountID(), params)
 	if err != nil {
 		return fmt.Errorf("error listing KV keys: %w", err)
 	}
@@ -130,11 +124,11 @@ func listKeys(client *cloudflare.API, namespace string, verbose bool, filter str
 	}
 
 	// Show pagination information if cursor is available
-	if listResult.Result_info.Cursor != "" && listResult.Result_info.Cursor != "null" {
+	if listResult.Cursor != "" && listResult.Cursor != "null" {
 		fmt.Printf("\nMore keys available. Use this cursor for the next page:\n")
-		fmt.Printf("  --cursor=%s\n", listResult.Result_info.Cursor)
+		fmt.Printf("  --cursor=%s\n", listResult.Cursor)
 	}
 
-	fmt.Printf("\nShowing %d/%d keys\n", len(keys), listResult.Result_info.Count)
+	fmt.Printf("\nShowing %d/%d keys\n", len(keys), listResult.Count)
 	return nil
 }

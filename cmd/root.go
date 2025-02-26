@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/erfianugrah/cache-purge-go/cmd/kv"
-	"github.com/erfianugrah/cache-purge-go/internal/api"
+	"cfpurge/cmd/kv"
+	"cfpurge/internal/api"
 
 	"github.com/spf13/cobra"
 )

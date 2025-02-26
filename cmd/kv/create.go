@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"cf-purge/internal/api"
-	"cf-purge/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"

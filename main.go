@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/erfianugrah/cache-purge-go/cmd"
+	"cfpurge/cmd"
 )
 
 var (

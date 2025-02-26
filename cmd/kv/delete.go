@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"cf-purge/internal/api"
-	"cf-purge/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
@@ -79,11 +79,11 @@ func newDeleteCmd() *cobra.Command {
 					return nil
 				}
 
-				err := client.DeleteWorkersKVEntry(context.Background(), cloudflare.DeleteWorkersKVEntryParams{
+				params := cloudflare.DeleteWorkersKVEntryParams{
 					NamespaceID: namespaces[0],
-					AccountID:   api.GetAccountID(),
 					Key:         key,
-				})
+				}
+				err := client.DeleteWorkersKVEntry(context.Background(), api.GetAccountID(), params)
 
 				if err != nil {
 					return fmt.Errorf("error deleting KV key: %w", err)
@@ -98,17 +98,17 @@ func newDeleteCmd() *cobra.Command {
 
 			if allNamespaces {
 				// Get all namespaces
-				namespaces, _, err := client.ListWorkersKVNamespaces(context.Background(), api.GetAccountID(), cloudflare.ListWorkersKVNamespacesParams{})
+				resp, _, err := client.ListWorkersKVNamespaces(context.Background(), api.GetAccountID(), cloudflare.ListWorkersKVNamespacesParams{})
 				if err != nil {
 					return fmt.Errorf("error listing KV namespaces: %w", err)
 				}
 
-				if len(namespaces) == 0 {
+				if len(resp) == 0 {
 					return fmt.Errorf("no KV namespaces found in account")
 				}
 
-				util.Info("Found %d KV namespaces to process", len(namespaces))
-				for _, ns := range namespaces {
+				util.Info("Found %d KV namespaces to process", len(resp))
+				for _, ns := range resp {
 					namespaceIDs = append(namespaceIDs, ns.ID)
 				}
 			} else {
@@ -124,10 +124,8 @@ func newDeleteCmd() *cobra.Command {
 				fmt.Printf("\nProcessing namespace: %s\n", nsID)
 
 				// Get all keys in the namespace
-				keys, _, err := client.ListWorkersKVKeys(context.Background(), cloudflare.ListWorkersKVKeysParams{
+				keys, _, err := client.ListWorkersKVKeys(context.Background(), api.GetAccountID(), cloudflare.ListWorkersKVKeysParams{
 					NamespaceID: nsID,
-					AccountID:   api.GetAccountID(),
-					Metadata:    true,
 				})
 				if err != nil {
 					util.Error("Error listing KV keys in namespace %s: %v", nsID, err)
@@ -188,11 +186,11 @@ func newDeleteCmd() *cobra.Command {
 						defer wg.Done()
 
 						for _, key := range keys {
-							err := client.DeleteWorkersKVEntry(context.Background(), cloudflare.DeleteWorkersKVEntryParams{
+							params := cloudflare.DeleteWorkersKVEntryParams{
 								NamespaceID: nsID,
-								AccountID:   api.GetAccountID(),
 								Key:         key,
-							})
+							}
+							err := client.DeleteWorkersKVEntry(context.Background(), api.GetAccountID(), params)
 
 							deleteMutex.Lock()
 							if err != nil {

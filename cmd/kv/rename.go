@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"cf-purge/internal/api"
-	"cf-purge/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
@@ -46,13 +46,14 @@ func newRenameCmd() *cobra.Command {
 			}
 
 			// Rename KV namespace
+			params := cloudflare.UpdateWorkersKVNamespaceParams{
+				NamespaceID: namespaceID,
+				Title:       title,
+			}
 			_, err = client.UpdateWorkersKVNamespace(
 				context.Background(),
 				api.GetAccountID(),
-				cloudflare.UpdateWorkersKVNamespaceParams{
-					NamespaceID: namespaceID,
-					Title:       title,
-				},
+				params,
 			)
 
 			if err != nil {

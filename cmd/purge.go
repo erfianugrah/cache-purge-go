@@ -5,20 +5,20 @@ import (
 	"fmt"
 	"strings"
 
-	"cf-purge/internal/api"
-	"cf-purge/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
 )
 
 var (
-	purgeHosts     string
-	purgeURLs      string
-	purgeTags      string
-	purgeAll       bool
+	purgeHosts      string
+	purgeURLs       string
+	purgeTags       string
+	purgeAll        bool
 	purgeEverything bool
-	purgeQuiet     bool
+	purgeQuiet      bool
 )
 
 // purgeCmd represents the purge command
@@ -49,7 +49,7 @@ var purgeCmd = &cobra.Command{
 			return fmt.Errorf("must specify at least one zone, use --all flag, or provide hosts/urls/tags")
 		}
 
-		zones, err := client.ListZones(context.Background())
+		zones, err := api.ListZones(context.Background())
 		if err != nil {
 			return fmt.Errorf("error getting zones: %w", err)
 		}
@@ -143,15 +143,17 @@ var purgeCmd = &cobra.Command{
 				var err error
 
 				if len(purgeHostsList) > 0 {
-					_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+					purgeReq := cloudflare.PurgeCacheRequest{
 						Hosts: purgeHostsList,
-					})
+					}
+					_, err = client.PurgeCache(context.Background(), zone.ID, purgeReq)
 				}
 
 				if len(purgeURLsList) > 0 {
-					_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+					purgeReq := cloudflare.PurgeCacheRequest{
 						Files: purgeURLsList,
-					})
+					}
+					_, err = client.PurgeCache(context.Background(), zone.ID, purgeReq)
 				}
 
 				if purgeTags != "" {
@@ -162,18 +164,19 @@ var purgeCmd = &cobra.Command{
 						if end > len(tagsList) {
 							end = len(tagsList)
 						}
-						
+
 						batchTags := tagsList[i:end]
-						_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+						purgeReq := cloudflare.PurgeCacheRequest{
 							Tags: batchTags,
-						})
-						
+						}
+						_, err = client.PurgeCache(context.Background(), zone.ID, purgeReq)
+
 						if err != nil {
 							break
 						}
 					}
 				}
-				
+
 				if err != nil {
 					util.Error("Error purging cache for %s: %v", zone.Name, err)
 					failureCount++
@@ -203,4 +206,8 @@ var purgeCmd = &cobra.Command{
 func init() {
 	purgeCmd.Flags().StringVar(&purgeHosts, "hosts", "", "Comma-separated list of hosts to purge")
 	purgeCmd.Flags().StringVar(&purgeURLs, "urls", "", "Comma-separated list of URLs to purge")
-	purgeCmd.Flags().StringVar(&purgeTags, "tags", "", "Comma-separated list of cache tags to purge
+	purgeCmd.Flags().StringVar(&purgeTags, "tags", "", "Comma-separated list of cache tags to purge (Enterprise only)")
+	purgeCmd.Flags().BoolVar(&purgeAll, "all", false, "Apply to all zones")
+	purgeCmd.Flags().BoolVar(&purgeEverything, "everything", false, "Purge everything from cache")
+	purgeCmd.Flags().BoolVar(&purgeQuiet, "quiet", false, "Suppress success messages")
+}

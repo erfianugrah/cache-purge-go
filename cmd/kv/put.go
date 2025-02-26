@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"cf-purge/internal/api"
-	"cf-purge/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
@@ -105,14 +105,9 @@ func newPutCmd() *cobra.Command {
 			// Create params for write
 			params := cloudflare.WriteWorkersKVEntryParams{
 				NamespaceID: namespace,
-				AccountID:   api.GetAccountID(),
 				Key:         key,
 				Value:       valueData,
-			}
-
-			// Add metadata and expiration if provided
-			if metadataMap != nil {
-				params.Metadata = metadataMap
+				Metadata:    metadataMap,
 			}
 
 			if expirationTTL > 0 {
@@ -125,7 +120,7 @@ func newPutCmd() *cobra.Command {
 			}
 
 			// Write the KV entry
-			err = client.WriteWorkersKVEntry(context.Background(), params)
+			err = client.WriteWorkersKVEntry(context.Background(), api.GetAccountID(), params)
 			if err != nil {
 				return fmt.Errorf("error writing KV entry: %w", err)
 			}
@@ -165,4 +160,3 @@ func newPutCmd() *cobra.Command {
 	cmd.MarkFlagRequired("key")
 
 	return cmd
-}

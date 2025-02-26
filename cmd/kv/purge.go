@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"cf-purge/internal/api"
-	"cf-purge/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
@@ -87,10 +87,8 @@ func newPurgeCmd() *cobra.Command {
 				fmt.Printf("\nProcessing namespace: %s\n", nsID)
 
 				// Get all keys in the namespace
-				keys, _, err := client.ListWorkersKVKeys(context.Background(), cloudflare.ListWorkersKVKeysParams{
+				keys, _, err := client.ListWorkersKVKeys(context.Background(), api.GetAccountID(), cloudflare.ListWorkersKVKeysParams{
 					NamespaceID: nsID,
-					AccountID:   api.GetAccountID(),
-					Metadata:    true,
 				})
 				if err != nil {
 					util.Error("Error listing KV keys in namespace %s: %v", nsID, err)
@@ -153,11 +151,11 @@ func newPurgeCmd() *cobra.Command {
 						defer wg.Done()
 
 						for _, key := range keys {
-							err := client.DeleteWorkersKVEntry(context.Background(), cloudflare.DeleteWorkersKVEntryParams{
+							params := cloudflare.DeleteWorkersKVEntryParams{
 								NamespaceID: nsID,
-								AccountID:   api.GetAccountID(),
 								Key:         key,
-							})
+							}
+							err := client.DeleteWorkersKVEntry(context.Background(), api.GetAccountID(), params)
 
 							deleteMutex.Lock()
 							if err != nil {
@@ -213,9 +211,10 @@ func newPurgeCmd() *cobra.Command {
 						batchTags := tagsList[i:end]
 
 						for _, zone := range zones {
-							_, err = client.PurgeCache(context.Background(), zone.ID, cloudflare.PurgeCacheRequest{
+							purgeReq := cloudflare.PurgeCacheRequest{
 								Tags: batchTags,
-							})
+							}
+							_, err := client.PurgeCache(context.Background(), zone.ID, purgeReq)
 
 							if err != nil {
 								util.Error("Error purging cache for zone %s:%v", zone.Name, err)

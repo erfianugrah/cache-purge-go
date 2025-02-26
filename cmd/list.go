@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/erfianugrah/cache-purge-go/internal/api"
-	"github.com/erfianugrah/cache-purge-go/internal/util"
+	"cfpurge/internal/api"
+	"cfpurge/internal/util"
 
 	"github.com/spf13/cobra"
 )

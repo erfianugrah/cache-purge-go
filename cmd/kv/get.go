@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"cf-purge/internal/api"
+	"cfpurge/internal/api"
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/spf13/cobra"
@@ -52,12 +52,7 @@ func newGetCmd() *cobra.Command {
 
 			if metadata {
 				// Get metadata only
-				meta, err := client.GetWorkersKVEntryMetadata(context.Background(), cloudflare.GetWorkersKVEntryMetadataParams{
-					NamespaceID: namespace,
-					AccountID:   api.GetAccountID(),
-					Key:         key,
-				})
-
+				meta, err := client.GetWorkersKVEntryMetadata(context.Background(), api.GetAccountID(), namespace, key)
 				if err != nil {
 					return fmt.Errorf("error getting KV metadata: %w", err)
 				}
@@ -70,17 +65,12 @@ func newGetCmd() *cobra.Command {
 				} else if meta == nil {
 					fmt.Println("  No metadata found")
 				} else {
-					metadata, _ := json.MarshalIndent(meta, "", "  ")
-					fmt.Println(string(metadata))
+					metadataJSON, _ := json.MarshalIndent(meta, "", "  ")
+					fmt.Println(string(metadataJSON))
 				}
 			} else {
 				// Get value
-				value, err := client.GetWorkersKV(context.Background(), cloudflare.GetWorkersKVParams{
-					NamespaceID: namespace,
-					AccountID:   api.GetAccountID(),
-					Key:         key,
-				})
-
+				value, err := client.GetWorkersKV(context.Background(), api.GetAccountID(), namespace, key)
 				if err != nil {
 					return fmt.Errorf("error getting KV value: %w", err)
 				}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	cloudflare "github.com/cloudflare/cloudflare-go"
+	"github.com/cloudflare/cloudflare-go"
 )
 
 // Config holds API credentials and configuration
@@ -70,5 +70,10 @@ func ListZones(ctx context.Context) ([]cloudflare.Zone, error) {
 		return nil, err
 	}
 
-	return client.ListZones(ctx)
+	zones, err := client.ListZones(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return zones, nil
 }
