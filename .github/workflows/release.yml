@@ -1,4 +1,4 @@
-name: Release Build
+name: Release
 
 on:
   push:
@@ -18,9 +18,19 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          go-version: '1.23'
+          check-latest: true
+          cache: true
+
+      - name: Verify dependencies
+        run: |
+          go mod verify
+          go mod download
+
+      - name: Run tests
+        run: go test -v ./...
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
@@ -30,3 +40,15 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+  notify:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get tag version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        
+      - name: Notify on success
+        run: |
+          echo "✅ Release ${{ steps.get_version.outputs.VERSION }} successfully published!"

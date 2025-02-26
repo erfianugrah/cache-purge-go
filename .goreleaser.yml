@@ -1,11 +1,16 @@
 version: 1
 
+project_name: cfpurge
+
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - env:
+  - id: cfpurge
+    main: .
+    binary: cfpurge
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -17,11 +22,12 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.buildTime={{.CommitDate}}
     mod_timestamp: '{{ .CommitTimestamp }}'
 
 archives:
-  - format: tar.gz
+  - id: cfpurge
+    format: tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -36,16 +42,44 @@ archives:
       - README.md
       - LICENSE*
 
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
 changelog:
   sort: asc
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^ci:'
       - '^Merge pull request'
+      - '^chore'
 
-checksum:
-  name_template: 'checksums.txt'
+signs:
+  - artifacts: checksum
+    args: ["--batch", "-u", "{{ .Env.GPG_FINGERPRINT }}", "--output", "${signature}", "--detach-sign", "${artifact}"]
 
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: erfianugrah
+    name: cache-purge-go
+  prerelease: auto
+  draft: false
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  header: |
+    # {{.ProjectName}} v{{.Version}}
+    
+    ## Release Notes
+  footer: |
+    ## Installation
+    
+    ```shell
+    # Install with go
+    go install github.com/erfianugrah/cache-purge-go@v{{.Version}}
+    
+    # Or download the binary directly from the releases page
+    ```
